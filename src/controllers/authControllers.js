@@ -2,7 +2,6 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import pg from "pg";
 import env from "dotenv";
-import cookieParser from "cookie-parser";
 
 env.config();
 
@@ -97,6 +96,9 @@ const loginUser = async (req, res) => {
             maxAge: 7 * 24 * 60 * 60 * 1000, 
         });
 
+        console.log(`User ${userUsername} logged in successfully`)
+        console.log(`User refreshToken: ${refreshToken}`)
+        console.log(`User accessToken: ${accessToken}`)
         res.status(200).json({
             message: `User ${userUsername} logged in successfully`,
             accessToken,
@@ -135,9 +137,15 @@ const refreshAccessToken = async (req, res) => {
 
     try {
         const tokenResult = await db.query("SELECT * FROM refresh_tokens WHERE token = $1", [refreshToken]);
-
         if (tokenResult.rows.length === 0) {
             return res.status(403).json({ message: "Invalid refresh token" });
+        }
+
+        const storedToken = tokenResult.rows[0];
+
+        if (new Date(storedToken.expires_at) < new Date()) {
+            await db.query("DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]); // Remove expired token
+            return res.status(403).json({ message: "Refresh token expired" });
         }
 
         jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET, (err, user) => {
