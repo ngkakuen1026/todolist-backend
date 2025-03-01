@@ -1,39 +1,26 @@
-import pg from "pg";
-import env from "dotenv";
 import bcrypt from "bcrypt";
-import multer from "multer";
-
-env.config();
-const db = new pg.Client({
-    user: process.env.PG_USER,
-    host: process.env.PG_HOST,
-    database: process.env.PG_DATABASE,
-    password: process.env.PG_PASSWORD,
-    port: process.env.PG_PORT,
-})
-db.connect();
+import pool from "../database/db.js"
 
 const saltRounds = 10;
 
 // Get all users (test)
 const getAllUser = async (req, res) => {
     try {
-        const result = await db.query("SELECT * FROM users")
-        res.status(200).json({ result })
-        console.log(result.rows)
+        const result = await pool.query("SELECT * FROM users");
+        res.status(200).json({ result });
+        console.log(result.rows);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Internal Server Error" });
     }
-}
+};
 
 // Fetch user profile
 const getUserProfile = async (req, res) => {
     try {
         const userId = req.user.user_id;
 
-        // Fetch user information, including the profile image and its type
-        const user = await db.query(
+        const user = await pool.query(
             "SELECT user_id, username, email, first_name, last_name, phone, gender, registration_date, profile_image, profile_image_type FROM users WHERE user_id = $1",
             [userId]
         );
@@ -42,18 +29,7 @@ const getUserProfile = async (req, res) => {
             return res.status(404).json({ message: "User not found" });
         }
 
-        const {
-            user_id,
-            username,
-            email,
-            first_name,
-            last_name,
-            phone,
-            gender,
-            registration_date,
-            profile_image,
-            profile_image_type,
-        } = user.rows[0];
+        const{user_id, username, email, first_name, last_name, phone, gender, registration_date, profile_image, profile_image_type} = user.rows[0];
 
         const profileImageBase64 = profile_image
             ? `data:${profile_image_type};base64,${profile_image.toString("base64")}`
@@ -84,7 +60,7 @@ const updateUser = async (req, res) => {
     const { first_name, last_name, phone, gender, email, password } = req.body;
 
     try {
-        const existingUser = await db.query("SELECT * FROM users WHERE user_id = $1", [userId]);
+        const existingUser = await pool.query("SELECT * FROM users WHERE user_id = $1", [userId]);
         if (existingUser.rows.length === 0) {
             return res.status(404).json({ message: "User not found" });
         }
@@ -119,7 +95,7 @@ const updateUser = async (req, res) => {
             query += "password = $" + (values.length + 1) + ", ";
             values.push(hashedPassword);
 
-            await db.query("DELETE FROM refresh_tokens WHERE user_id = $1", [userId]);
+            await pool.query("DELETE FROM refresh_tokens WHERE user_id = $1", [userId]);
         }
 
         // Remove the trailing comma and space, then add the WHERE clause
@@ -128,7 +104,7 @@ const updateUser = async (req, res) => {
         values.push(userId);
 
         // Execute the query
-        const updatedUser = await db.query(query, values);
+        const updatedUser = await pool.query(query, values);
 
         res.status(200).json({ 
             message: "User updated successfully", 
@@ -140,6 +116,38 @@ const updateUser = async (req, res) => {
     }
 };
 
+// Update User Password
+const updatePassword = async (req, res) => {
+  const userId = req.params.id;
+  const { oldPassword, newPassword } = req.body;
+
+  try {
+    const userQuery = await pool.query("SELECT * FROM users WHERE user_id = $1", [userId]);
+
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = userQuery.rows[0];
+
+    // Validate the old password
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Old password is incorrect" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await pool.query("UPDATE users SET password = $1 WHERE user_id = $2", [hashedPassword, userId]);
+
+    res.status(200).json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 const uploadImage = async (req, res) => {
     const userId = req.params.id;
 
@@ -149,7 +157,7 @@ const uploadImage = async (req, res) => {
     }
 
     try {
-        const result = await db.query(
+        const result = await pool.query(
             "UPDATE users SET profile_image = $1, profile_image_type = $2 WHERE user_id = $3",
             [req.file.buffer, req.file.mimetype, userId]
         );
@@ -169,4 +177,4 @@ const uploadImage = async (req, res) => {
 
 
 
-export {getUserProfile, updateUser, uploadImage};
+export {getAllUser, getUserProfile, updateUser, uploadImage, updatePassword};

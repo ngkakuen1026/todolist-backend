@@ -1,25 +1,13 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import pg from "pg";
-import env from "dotenv";
+import pool from "../database/db.js"
 
-env.config();
-
-// Validate environment variables
 if (!process.env.ACCESS_TOKEN_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
     throw new Error("Missing required environment variables");
 }
 
-const saltRounds = 10; // Moved saltRounds to global scope
-const db = new pg.Client({
-    user: process.env.PG_USER,
-    host: process.env.PG_HOST,
-    database: process.env.PG_DATABASE,
-    password: process.env.PG_PASSWORD,
-    port: process.env.PG_PORT,
-});
+const saltRounds = 10; 
 
-db.connect();
 
 const generateAccessToken = (userPayload) => {
     return jwt.sign(userPayload, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
@@ -34,8 +22,8 @@ const registerUser = async (req, res) => {
     const { first_name, last_name, username, phone, gender, email, password } = req.body;
 
     try {
-        const checkUserNameResult = await db.query("SELECT * FROM users WHERE username = $1", [username]);
-        const checkEmailResult = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+        const checkUserNameResult = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
+        const checkEmailResult = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
 
         if (checkUserNameResult.rows.length > 0) {
             return res.status(400).json({ message: `Username is already registered` });
@@ -46,7 +34,7 @@ const registerUser = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(String(password), saltRounds);
 
-        await db.query(
+        await pool.query(
             "INSERT INTO users (first_name, last_name, username, phone, gender, email, password) VALUES ($1, $2, $3, $4, $5, $6, $7)",
             [first_name, last_name, username, phone, gender, email, hashedPassword]
         );
@@ -63,7 +51,7 @@ const loginUser = async (req, res) => {
     const { username, password } = req.body;
 
     try {
-        const userResult = await db.query("SELECT * FROM users WHERE username = $1", [username]);
+        const userResult = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
 
         if (userResult.rows.length === 0) {
             return res.status(404).json({ message: "User not found" });
@@ -82,8 +70,8 @@ const loginUser = async (req, res) => {
         const refreshToken = generateRefreshToken({ user_id, username: userUsername });
 
         // Replace old refresh token and store the new one in the database
-        await db.query("DELETE FROM refresh_tokens WHERE user_id = $1", [user_id]);
-        await db.query(
+        await pool.query("DELETE FROM refresh_tokens WHERE user_id = $1", [user_id]);
+        await pool.query(
             "INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)",
             [refreshToken, user_id, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)]
         );
@@ -118,7 +106,7 @@ const logoutUser = async (req, res) => {
             return res.status(400).json({ message: "No refresh token provided" });
         }
 
-        await db.query("DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]);
+        await pool.query("DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]);
         res.clearCookie("refreshToken");
         res.status(200).json({ message: "Logged out successfully" });
     } catch (err) {
@@ -136,7 +124,7 @@ const refreshAccessToken = async (req, res) => {
     }
 
     try {
-        const tokenResult = await db.query("SELECT * FROM refresh_tokens WHERE token = $1", [refreshToken]);
+        const tokenResult = await pool.query("SELECT * FROM refresh_tokens WHERE token = $1", [refreshToken]);
         if (tokenResult.rows.length === 0) {
             return res.status(403).json({ message: "Invalid refresh token" });
         }
@@ -144,7 +132,7 @@ const refreshAccessToken = async (req, res) => {
         const storedToken = tokenResult.rows[0];
 
         if (new Date(storedToken.expires_at) < new Date()) {
-            await db.query("DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]); // Remove expired token
+            await pool.query("DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]); // Remove expired token
             return res.status(403).json({ message: "Refresh token expired" });
         }
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import bodyParser from 'body-parser';
-import { authenicateToken } from '../middleare/auth.js';
+import { authenicateToken } from '../middleware/auth.js';
 import { getUserTasks, createTask, updateTask, deleteTask } from '../controllers/taskController.js';
 
 const router = express.Router();
