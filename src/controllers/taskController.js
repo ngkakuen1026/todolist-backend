@@ -1,15 +1,4 @@
-import pg from 'pg';
-import env from "dotenv";
-
-env.config();
-const db = new pg.Client({
-    user: process.env.PG_USER,
-    host: process.env.PG_HOST,
-    database: process.env.PG_DATABASE,
-    password: process.env.PG_PASSWORD,
-    port: process.env.PG_PORT,
-});
-db.connect();
+import pool from "../database/db.js"
 
 // Get all tasks for the authenticated user
 const getUserTasks = async (req, res) => {
@@ -17,7 +6,7 @@ const getUserTasks = async (req, res) => {
     const username = req.user.username;
   
     try {
-      const tasks = await db.query('SELECT * FROM tasks WHERE user_id = $1', [userId]);
+      const tasks = await pool.query('SELECT * FROM tasks WHERE user_id = $1', [userId]);
   
       const tasksWithImages = tasks.rows.map((task) => {
         if (task.task_image) {
@@ -35,12 +24,48 @@ const getUserTasks = async (req, res) => {
       res.status(500).json({ message: 'Internal Server Error' });
     }
   };
+  export const getSpecificTask = async (req, res) => {
+    const { taskId } = req.params; // Extract taskId from the route parameters
+    const userId = req.user.user_id; // Extract userId from the authenticated token
+  
+    console.log("taskId:", taskId); // Log the value of taskId
+    console.log("userId:", userId); // Log the value of userId
+  
+    try {
+      // Fetch the task from the database
+      const task = await pool.query(
+        "SELECT * FROM tasks WHERE task_id = $1 AND user_id = $2",
+        [taskId, userId]
+      );
+  
+      if (task.rows.length === 0) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      const taskData = task.rows[0];
+  
+      if (taskData.task_image) {
+        const imageBuffer = taskData.task_image.data || taskData.task_image;
+        taskData.task_image = `data:${taskData.task_image_type};base64,${Buffer.from(imageBuffer).toString("base64")}`;
+      } else {
+        taskData.task_image = null; // No image available
+      }
+  
+      res.status(200).json({
+        message: "Task fetched successfully",
+        task: taskData,
+      });
+    } catch (error) {
+      console.error("Error fetching specific task:", error);
+      res.status(500).json({ message: "Server error fetching task" });
+    }
+  };
 
 // Create a new task
 const createTask = async (req, res) => {
     const userId = req.user.user_id;
     const { title, description, type, is_completed, task_image, task_image_type } = req.body;
-    const file = req.file; // File uploaded via form-data (if any)
+    const file = req.file;
   
     try {
       let imageBuffer = null;
@@ -54,7 +79,7 @@ const createTask = async (req, res) => {
         imageType = task_image_type;
       }
   
-      const result = await db.query(
+      const result = await pool.query(
         `INSERT INTO tasks (user_id, title, description, type, is_completed, task_image, task_image_type)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
         [userId, title, description, type, is_completed, imageBuffer, imageType]
@@ -79,7 +104,7 @@ const updateTask = async (req, res) => {
     const file = req.file;
   
     try {
-      const task = await db.query("SELECT * FROM tasks WHERE task_id = $1 AND user_id = $2", [taskId, userId]);
+      const task = await pool.query("SELECT * FROM tasks WHERE task_id = $1 AND user_id = $2", [taskId, userId]);
       if (task.rows.length === 0) {
         return res.status(404).json({ message: "Task not found or does not belong to user" });
       }
@@ -95,7 +120,7 @@ const updateTask = async (req, res) => {
         imageType = task_image_type;
       }
   
-      const updatedTask = await db.query(
+      const updatedTask = await pool.query(
         `UPDATE tasks 
          SET title = $1, description = $2, is_completed = $3, 
              task_image = COALESCE($4, task_image), 
@@ -122,7 +147,7 @@ const deleteTask = async (req, res) => {
     const userId = req.user.user_id;
 
     try {
-        const result = await db.query(
+        const result = await pool.query(
             "DELETE FROM tasks WHERE task_id = $1 AND user_id = $2 RETURNING *",
             [taskId, userId]
         );
